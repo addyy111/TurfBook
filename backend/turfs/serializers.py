@@ -23,14 +23,23 @@ class TurfImageSerializer(serializers.ModelSerializer):
 
 class AvailabilitySlotSerializer(serializers.ModelSerializer):
     is_available = serializers.SerializerMethodField()
+    is_past = serializers.SerializerMethodField()
 
     class Meta:
         model = AvailabilitySlot
-        fields = ('id', 'turf', 'date', 'start_time', 'end_time', 'price', 'is_blocked', 'block_reason', 'is_available')
+        fields = ('id', 'turf', 'date', 'start_time', 'end_time', 'price', 'is_blocked', 'block_reason', 'is_available', 'is_past')
+
+    def get_is_past(self, obj):
+        from datetime import datetime
+        slot_dt = datetime.combine(obj.date, obj.start_time)
+        return slot_dt < datetime.now()
 
     def get_is_available(self, obj):
-        # A slot is available if it is not blocked and not already booked in a confirmed/pending state
         if obj.is_blocked:
+            return False
+        from datetime import datetime
+        slot_dt = datetime.combine(obj.date, obj.start_time)
+        if slot_dt < datetime.now():
             return False
         # Check against active bookings overlapping this slot
         from bookings.models import Booking

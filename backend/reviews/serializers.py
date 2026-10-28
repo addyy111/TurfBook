@@ -17,6 +17,6 @@ class ReviewCreateSerializer(serializers.ModelSerializer):
         fields = ('turf', 'rating', 'comment')
 
     def create(self, validated_data):
-        user = self.context['request'].user
-        validated_data['customer'] = user
+        if 'customer' not in validated_data and 'request' in self.context:
+            validated_data['customer'] = self.context['request'].user
         return Review.objects.create(**validated_data)

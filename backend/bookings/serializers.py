@@ -42,7 +42,33 @@ class BookingCreateSerializer(serializers.Serializer):
         end_dt = start_dt + timedelta(hours=duration_hours)
         end_time = end_dt.time()
 
-        # Check for overlapping active bookings (CRITICAL REQUIREMENT: PREVENT DOUBLE BOOKING)
+        # 1. Prevent past booking
+        if start_dt < datetime.now():
+            raise serializers.ValidationError({
+                "slot": "Cannot book a time slot in the past. Please select an upcoming slot."
+            })
+
+        # 2. Operating hours check
+        if start_time < turf.opening_time or end_time > turf.closing_time:
+            raise serializers.ValidationError({
+                "slot": f"Booking time must be within venue operating hours ({turf.opening_time.strftime('%H:%M')} to {turf.closing_time.strftime('%H:%M')})."
+            })
+
+        # 3. Check for owner-blocked slots
+        from turfs.models import AvailabilitySlot
+        blocked = AvailabilitySlot.objects.filter(
+            turf=turf,
+            date=booking_date,
+            is_blocked=True,
+            start_time__lt=end_time,
+            end_time__gt=start_time
+        )
+        if blocked.exists():
+            raise serializers.ValidationError({
+                "slot": "This time slot is currently blocked by venue management. Please choose another slot."
+            })
+
+        # 4. Check for overlapping active bookings (CRITICAL REQUIREMENT: PREVENT DOUBLE BOOKING)
         overlapping = Booking.objects.filter(
             turf=turf,
             booking_date=booking_date,

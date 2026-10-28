@@ -25,6 +25,13 @@ export const AuthProvider = ({ children }) => {
     };
 
     initAuth();
+
+    const handleAuthLogout = () => {
+      setUser(null);
+      setToken(null);
+    };
+    window.addEventListener('auth:logout', handleAuthLogout);
+    return () => window.removeEventListener('auth:logout', handleAuthLogout);
   }, []);
 
   const login = async (email, password) => {

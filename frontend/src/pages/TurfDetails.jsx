@@ -33,8 +33,12 @@ export const TurfDetails = () => {
   const [selectedImage, setSelectedImage] = useState('');
   const [isFavorited, setIsFavorited] = useState(false);
 
-  // Booking state
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  // Booking state - local date to prevent timezone skew
+  const getTodayStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const [selectedDate, setSelectedDate] = useState(getTodayStr());
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [duration, setDuration] = useState(1);
 
@@ -92,7 +96,9 @@ export const TurfDetails = () => {
       return;
     }
 
-    const isWeekend = new Date(selectedDate).getDay() === 0 || new Date(selectedDate).getDay() === 6;
+    const [y, m, d] = selectedDate.split('-').map(Number);
+    const dayOfWeek = new Date(y, m - 1, d).getDay();
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
     const hourlyRate = (isWeekend && turf.weekend_price_per_hour) ? parseFloat(turf.weekend_price_per_hour) : parseFloat(turf.base_price_per_hour);
     const basePrice = Math.round(hourlyRate * duration);
     const platformFee = 40;

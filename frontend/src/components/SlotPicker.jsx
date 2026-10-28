@@ -2,16 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, Sun, Moon, Check, AlertCircle, Loader2 } from 'lucide-react';
 import { turfService } from '../services/turfService';
 
-export const SlotPicker = ({ turf, onSlotSelect, selectedSlot, selectedDate, setSelectedDate, duration, setDuration }) => {
+export const SlotPicker = ({ turf, onSlotSelect, selectedSlot, selectedDate, setSelectedDate, duration = 1, setDuration }) => {
   const [slots, setSlots] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Generate next 6 days - Mention ONLY the day name (e.g. Mon, Tue, Wed) to fit perfectly without overflow
-  const dateOptions = Array.from({ length: 6 }).map((_, i) => {
+  // Generate next 7 days with local timezone safety (avoiding UTC toISOString skews)
+  const dateOptions = Array.from({ length: 7 }).map((_, i) => {
     const d = new Date();
     d.setDate(d.getDate() + i);
-    const dateStr = d.toISOString().split('T')[0];
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
     const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
     const formattedDate = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     return { dateStr, dayName, formattedDate };
@@ -52,6 +55,11 @@ export const SlotPicker = ({ turf, onSlotSelect, selectedSlot, selectedDate, set
     return hour >= 16;
   });
 
+  // Today string for time verification
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const isToday = selectedDate === todayStr;
+
   const renderSlotGrid = (slotList, title, icon) => {
     if (slotList.length === 0) return null;
 
@@ -64,8 +72,44 @@ export const SlotPicker = ({ turf, onSlotSelect, selectedSlot, selectedDate, set
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {slotList.map((slot) => {
             const isSelected = selectedSlot?.id === slot.id;
-            const isAvailable = slot.is_available && !slot.is_blocked;
-            const timeFormatted = `${slot.start_time.slice(0, 5)} - ${slot.end_time.slice(0, 5)}`;
+
+            // 1. Check if the slot has already passed today
+            let isPast = false;
+            if (isToday) {
+              const [sh, sm] = slot.start_time.split(':').map(Number);
+              const slotStartTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), sh, sm);
+              if (slotStartTime <= now) {
+                isPast = true;
+              }
+            }
+
+            // 2. Check duration conflict if duration > 1 hour
+            const [sh, sm] = slot.start_time.split(':').map(Number);
+            const startMinutes = sh * 60 + sm;
+            const durationMinutes = (duration || 1) * 60;
+            const endMinutes = startMinutes + durationMinutes;
+
+            let hasDurationConflict = false;
+            for (let offset = 60; offset < durationMinutes; offset += 60) {
+              const targetMin = startMinutes + offset;
+              const nextH = Math.floor(targetMin / 60);
+              const nextM = targetMin % 60;
+              const nextTimePrefix = `${String(nextH).padStart(2, '0')}:${String(nextM).padStart(2, '0')}`;
+              const nextSlot = slots.find((s) => s.start_time.startsWith(nextTimePrefix));
+              if (!nextSlot || !nextSlot.is_available || nextSlot.is_blocked) {
+                hasDurationConflict = true;
+                break;
+              }
+            }
+
+            const isAvailable = slot.is_available && !slot.is_blocked && !isPast && !hasDurationConflict;
+
+            // Formatted start and end time reflecting chosen duration
+            const endH = Math.floor(endMinutes / 60);
+            const endM = endMinutes % 60;
+            const displayEndTime = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+            const timeFormatted = `${slot.start_time.slice(0, 5)} - ${displayEndTime}`;
+            const slotPrice = Math.round(Number(slot.price) * (duration || 1));
 
             return (
               <button
@@ -73,9 +117,19 @@ export const SlotPicker = ({ turf, onSlotSelect, selectedSlot, selectedDate, set
                 type="button"
                 disabled={!isAvailable}
                 onClick={() => isAvailable && onSlotSelect(slot)}
-                title={!isAvailable ? 'This slot has already been booked by another player' : 'Click to select this slot'}
-                className={`relative p-2.5 rounded-xl border text-center transition-all flex flex-col items-center justify-center min-h-[60px] ${
-                  !isAvailable
+                title={
+                  isPast
+                    ? 'This slot time has already passed'
+                    : hasDurationConflict
+                    ? 'Subsequent slot is unavailable for this duration'
+                    : !slot.is_available || slot.is_blocked
+                    ? 'This slot has already been booked by another player'
+                    : 'Click to select this slot'
+                }
+                className={`relative p-2.5 rounded-xl border text-center transition-all flex flex-col items-center justify-center min-h-[64px] ${
+                  isPast
+                    ? 'bg-slate-100/70 border-slate-200 text-slate-400 cursor-not-allowed select-none'
+                    : !isAvailable
                     ? 'bg-rose-50/50 border-rose-200/60 text-slate-400 cursor-not-allowed select-none'
                     : isSelected
                     ? 'bg-emerald-500 border-emerald-500 text-slate-950 font-bold shadow-md shadow-emerald-500/20 ring-2 ring-emerald-500/30 cursor-pointer'
@@ -87,13 +141,21 @@ export const SlotPicker = ({ turf, onSlotSelect, selectedSlot, selectedDate, set
                 </span>
 
                 <div className="mt-1">
-                  {!isAvailable ? (
+                  {isPast ? (
+                    <span className="inline-flex items-center text-[9px] font-bold uppercase tracking-wider text-slate-400 bg-slate-200/80 px-1.5 py-0.5 rounded">
+                      Passed
+                    </span>
+                  ) : hasDurationConflict ? (
+                    <span className="inline-flex items-center text-[9px] font-extrabold uppercase tracking-wider text-amber-700 bg-amber-100/90 px-1.5 py-0.5 rounded">
+                      Unavailable
+                    </span>
+                  ) : !slot.is_available || slot.is_blocked ? (
                     <span className="inline-flex items-center text-[9px] font-extrabold uppercase tracking-wider text-rose-600 bg-rose-100/90 px-1.5 py-0.5 rounded">
                       Already Booked
                     </span>
                   ) : (
                     <span className={`text-[11px] font-bold ${isSelected ? 'text-slate-950' : 'text-slate-600'}`}>
-                      ₹{Math.round(slot.price)}
+                      ₹{slotPrice}
                     </span>
                   )}
                 </div>
@@ -113,13 +175,13 @@ export const SlotPicker = ({ turf, onSlotSelect, selectedSlot, selectedDate, set
 
   return (
     <div className="space-y-6">
-      {/* 1. Date Selector Carousel - Mention ONLY the day to prevent any text overflowing */}
+      {/* 1. Date Selector Carousel */}
       <div>
         <label className="flex items-center text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
           <Calendar className="w-4 h-4 mr-1.5 text-emerald-600" />
           <span>Select Date</span>
         </label>
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+        <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
           {dateOptions.map((item) => {
             const isSelected = selectedDate === item.dateStr;
             return (
@@ -149,28 +211,33 @@ export const SlotPicker = ({ turf, onSlotSelect, selectedSlot, selectedDate, set
       </div>
 
       {/* 2. Duration Selector */}
-      <div>
-        <label className="flex items-center text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
-          <Clock className="w-4 h-4 mr-1.5 text-emerald-600" />
-          <span>Duration (Hours)</span>
-        </label>
-        <div className="flex space-x-2">
-          {[1, 1.5, 2, 3].map((dur) => (
-            <button
-              key={dur}
-              type="button"
-              onClick={() => setDuration(dur)}
-              className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                duration === dur
-                  ? 'bg-emerald-500 text-slate-950 border-emerald-500 shadow-sm'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              {dur} hr{dur > 1 ? 's' : ''}
-            </button>
-          ))}
+      {setDuration && (
+        <div>
+          <label className="flex items-center text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+            <Clock className="w-4 h-4 mr-1.5 text-emerald-600" />
+            <span>Duration (Hours)</span>
+          </label>
+          <div className="flex space-x-2">
+            {[1, 1.5, 2, 3].map((dur) => (
+              <button
+                key={dur}
+                type="button"
+                onClick={() => {
+                  setDuration(dur);
+                  if (onSlotSelect) onSlotSelect(null);
+                }}
+                className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                  duration === dur
+                    ? 'bg-emerald-500 text-slate-950 border-emerald-500 shadow-sm'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                {dur} hr{dur > 1 ? 's' : ''}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 3. Slot Legend */}
       <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 py-1">
@@ -184,7 +251,11 @@ export const SlotPicker = ({ turf, onSlotSelect, selectedSlot, selectedDate, set
         </div>
         <div className="flex items-center space-x-1.5">
           <div className="w-3 h-3 rounded bg-rose-100 border border-rose-300" />
-          <span className="text-rose-600 font-semibold">Already Booked</span>
+          <span className="text-rose-600 font-semibold">Booked</span>
+        </div>
+        <div className="flex items-center space-x-1.5">
+          <div className="w-3 h-3 rounded bg-slate-200 border border-slate-300" />
+          <span className="text-slate-400 font-semibold">Passed</span>
         </div>
       </div>
 
@@ -214,3 +285,4 @@ export const SlotPicker = ({ turf, onSlotSelect, selectedSlot, selectedDate, set
     </div>
   );
 };
+

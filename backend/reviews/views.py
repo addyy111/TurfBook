@@ -17,5 +17,8 @@ class CreateReviewView(generics.CreateAPIView):
     permission_classes = (permissions.IsAuthenticated,)
     serializer_class = ReviewCreateSerializer
 
-    def perform_create(self, serializer):
-        serializer.save(customer=self.request.user)
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        review = serializer.save(customer=request.user)
+        return Response(ReviewSerializer(review).data, status=status.HTTP_201_CREATED)
